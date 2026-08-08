@@ -51,6 +51,18 @@ An explicitly authorized transfer test was subsequently run against the user's s
 - ACS: `saveItems` succeeded, so the citation remains in My Library. ACS rejected both the main PDF and SI binary fetches before they could be sent to Zotero; its attachment-resolver fallback returned HTTP 500.
 - A bounded ACS browser-challenge bypass probe also timed out. The experimental whitelist change was reverted because it did not solve the transfer failure.
 
+## Cell Press personal-library transfer
+
+[Deep-sea megafauna co-opts microbial energy metabolism genes to withstand ultra-long starvation](https://www.cell.com/cell/fulltext/S0092-8674(26)00571-4)
+
+- Detected **Cell Press** and saved DOI `10.1016/j.cell.2026.05.012`.
+- The original `www.cell.com/cms/.../attachment/...` URLs returned Cloudflare HTTP 403 responses even from the loaded article page.
+- The translator now derives the corresponding public `ars.els-cdn.com` URLs from the article PII and `mmc*` filenames in download mode.
+- Connector-level fetch validation downloaded both PDFs: 2,806,935 bytes and 9,350,052 bytes.
+- The replacement library save produced one successful `saveItems` call and two successful `saveAttachment` calls, one for each SI PDF.
+- The main full-text PDF remained blocked by Cell Press; the SI transfer itself is confirmed functional.
+- The user deleted the incomplete first attempt before the successful replacement citation was written.
+
 The remaining ACS release issue is therefore binary delivery/authentication, not translator detection or SI discovery.
 
 The companion Zotero Desktop endpoint test is present, but its application build is currently blocked by upstream build scripts that do not quote workspace paths containing spaces. The Connector preference bridge itself is covered by the passing Connector tests.

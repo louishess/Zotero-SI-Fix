@@ -19,7 +19,8 @@
 - Nature's modern SI parser emits 3 PDF and 18 XLSX files for `s41586-026-10843-7` and excludes all 10 Extended Data figure-page links.
 - Nature personal-library transfer succeeded: citation, main PDF, and all 21 SI files were accepted by Zotero.
 - ACS's new Silverchair URL is detected by the ACS translator. The correct DOI, metadata, main-PDF candidate, and one SI PDF candidate are emitted.
-- Cell Press saves metadata and emits one unique SI PDF on the Heliyon reproduction page; the obsolete PDF text probe no longer aborts translation.
+- Cell Press saves metadata and modern SI files, deduplicates repeated page markup, and rewrites downloadable `mmc*` files to Elsevier's public CDN to avoid `www.cell.com` Cloudflare challenges.
+- Cell Press personal-library transfer succeeded for `10.1016/j.cell.2026.05.012`: one citation and both SI PDFs were accepted by Zotero.
 - Download and link-only translator modes passed for ACS and Nature attachment descriptors.
 - The final non-live Connector suite passes: 102 passing, 4 opt-in live diagnostics skipped.
 
@@ -27,7 +28,7 @@
 
 - ACS binary transfer is still blocked by publisher anti-bot behavior. The citation saves to Zotero, but both the main PDF and SI fetch fail before `saveAttachment`; the resolver fallback returns HTTP 500.
 - Adding `pubs.acs.org` to the generic browser-challenge whitelist did not help: both hidden-frame and window-monitor paths timed out. That experiment was reverted and must not be reintroduced without a different mechanism.
-- Cell Press has descriptor-level live coverage but has not yet had a personal-library byte-transfer run.
+- Cell Press's main full-text PDF URL still receives a Cloudflare challenge in the isolated Connector browser. The tested citation received both SI PDFs but not the main PDF.
 - The Zotero Desktop endpoint test is committed but was not executed successfully in this checkout. Its build scripts fail when the Desktop path contains spaces, and the CI configuration expects Node 18. Test it from a no-space checkout with the supported toolchain.
 - Broader ACS issue-page selection and the PDF/XLSX/ZIP/MP4 matrix have focused helper coverage, but not a complete live Chrome matrix after the Silverchair migration.
 
@@ -57,6 +58,15 @@ env LIVE_PUBLISHER_TESTS=true EXPECT_PUBLISHER_FIXES=true \
   --timeout 120000
 ```
 
+Focused Cell Press binary-fetch diagnostic without a library write:
+
+```sh
+env LIVE_PUBLISHER_TESTS=true LIVE_ATTACHMENT_FETCH_ONLY=true \
+  LIVE_CELL_PRESS_URL='https://www.cell.com/cell/fulltext/S0092-8674(26)00571-4' \
+  npx mocha --grep 'Live publisher translator diagnostics Cell Press$' \
+  --timeout 120000
+```
+
 Translator syntax:
 
 ```sh
@@ -74,10 +84,10 @@ test/runtests.sh -b -g 'should return translator preferences to the Connector'
 
 ## Library-writing test warning
 
-`LIVE_LIBRARY_TRANSFER=true` sends real writes to Zotero's currently selected library. Do not run it casually. The authorized run in this task left two citations in **My Library** for the user to remove later:
+`LIVE_LIBRARY_TRANSFER=true` sends real writes to Zotero's currently selected library. Do not run it casually. The authorized runs in this task left three citations in **My Library** for the user to remove later:
 
 - Nature citation with the main PDF and all 21 SI files.
 - ACS citation without binary attachments.
+- Cell Press citation `10.1016/j.cell.2026.05.012` with both SI PDFs. The user manually deleted the incomplete first attempt before the successful replacement save.
 
 No test citation or attachment was deleted.
-
