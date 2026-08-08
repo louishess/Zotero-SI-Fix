@@ -367,6 +367,7 @@ Zotero.Prefs = new function() {
 	}
 	
 	this.syncStorage = {};
+	this.runtimeOverrides = {};
 
 	/**
 	 * Should override per browser and load data into this.syncStorage
@@ -375,6 +376,9 @@ Zotero.Prefs = new function() {
 	
 	this.get = function(pref) {
 		try {
+			if (Object.prototype.hasOwnProperty.call(this.runtimeOverrides, pref)) {
+				return this.runtimeOverrides[pref];
+			}
 			if (!(pref in this.syncStorage)) throw new Error(`Prefs.get: ${pref} not preloaded`);
 			return this.syncStorage[pref];
 		} catch (e) {
@@ -394,13 +398,47 @@ Zotero.Prefs = new function() {
 	};
 	
 	this.getAll = function() {
-		let prefs = Object.assign({}, DEFAULTS, this.syncStorage);
+		// getAll() is also invoked through MessagingGeneric, which calls function
+		// overrides without their object receiver. Use the namespace explicitly so
+		// browser-stored and runtime values are included in injected/offscreen pages.
+		let prefs = Object.assign(
+			{},
+			DEFAULTS,
+			Zotero.Prefs.syncStorage,
+			Zotero.Prefs.runtimeOverrides
+		);
 		delete prefs['translatorMetadata'];
 		// Do not return translator code from storage as they are not prefs to be edited
 		for (const key of Object.keys(prefs)) {
 			if (key.startsWith(Zotero.Translators.PREFS_TRANSLATOR_CODE_PREFIX)) delete prefs[key];
 		}
 		return Zotero.Promise.resolve(prefs);
+	};
+
+	/**
+	 * Replaces non-persistent preference values for a namespace.
+	 *
+	 * Runtime overrides are used for preferences supplied by a connected Zotero
+	 * client. They must not be written to browser storage, because Connector-local
+	 * preferences remain the source of truth when saving to zotero.org.
+	 *
+	 * @param {String} namespace
+	 * @param {Object} prefs Full preference names mapped to values
+	 */
+	this.replaceRuntimeOverrides = function(namespace, prefs={}) {
+		if (typeof namespace !== 'string' || !namespace) {
+			throw new Error('Zotero.Prefs.replaceRuntimeOverrides: namespace must be a non-empty string');
+		}
+		for (let pref of Object.keys(this.runtimeOverrides)) {
+			if (pref.startsWith(namespace)) {
+				delete this.runtimeOverrides[pref];
+			}
+		}
+		for (let [pref, value] of Object.entries(prefs)) {
+			if (pref.startsWith(namespace)) {
+				this.runtimeOverrides[pref] = value;
+			}
+		}
 	};
 	
 	this.getDefault = function() {
@@ -435,6 +473,15 @@ Zotero.Prefs = new function() {
 		if (Zotero.isBackground) throw new Error('trying to load namespace in background. all prefs are available via the sync API');
 		if (! Array.isArray(namespaces)) namespaces = [namespaces];
 		return this.getAll().then(function(prefs) {
+			// This method can be called again after a connected Zotero client changes
+			// runtime overrides. Remove stale values before loading the effective set.
+			for (let namespace of namespaces) {
+				for (let key of Object.keys(this.syncStorage)) {
+					if (key.indexOf(namespace) === 0) {
+						delete this.syncStorage[key];
+					}
+				}
+			}
 			let keys = Object.keys(prefs);
 			for (let namespace of namespaces) {
 				keys.filter((key) => key.indexOf(namespace) === 0)

@@ -23,7 +23,7 @@
 	***** END LICENSE BLOCK *****
 */
 
-import { background } from '../support/utils.mjs';
+import { background, offscreen } from '../support/utils.mjs';
 
 describe('Connector', function() {
 	describe('#checkIsOnline()', function() {
@@ -54,6 +54,19 @@ describe('Connector', function() {
 			});
 			assert.isNotOk(status);
 		});
+
+		it('clears desktop translator preferences when the ping fails', async function() {
+			let prefs = await background(async function() {
+				Zotero.Connector._processTranslatorPreferences({
+					translatorPrefsVersion: 1,
+					translatorPrefs: { attachSupplementary: true }
+				});
+				Zotero.HTTP.request.throws(new Zotero.HTTP.StatusError({status: 0}));
+				await Zotero.Connector.checkIsOnline();
+				return Zotero.Prefs.getAll();
+			});
+			assert.notProperty(prefs, 'translators.attachSupplementary');
+		});
 		
 		it('returns true if Zotero responds with a non-200 status', async function () {
 			let result = await background(async function() {
@@ -65,6 +78,92 @@ describe('Connector', function() {
 				}
 			});
 			assert.isTrue(result);
+		});
+	});
+
+	describe('translator preferences', function() {
+		afterEach(async function() {
+			await background(async function() {
+				Zotero.Connector._processTranslatorPreferences();
+				await Zotero.Prefs.clear([
+					'translators.attachSupplementary',
+					'translators.supplementaryAsLink'
+				]);
+			});
+		});
+
+		it('uses connected Zotero translator preferences as runtime overrides', async function() {
+			let values = await background(async function() {
+				await Zotero.Prefs.set('translators.attachSupplementary', false);
+				Zotero.Connector._processPreferences({
+					translatorPrefsVersion: 1,
+					translatorPrefs: {
+						attachSupplementary: true,
+						supplementaryAsLink: true
+					}
+				});
+				return [
+					Zotero.Prefs.get('translators.attachSupplementary'),
+					Zotero.Prefs.get('translators.supplementaryAsLink')
+				];
+			});
+			assert.deepEqual(values, [true, true]);
+		});
+
+		it('restores Connector-local preferences when desktop overrides are cleared', async function() {
+			let value = await background(async function() {
+				await Zotero.Prefs.set('translators.attachSupplementary', true);
+				Zotero.Connector._processTranslatorPreferences({
+					translatorPrefsVersion: 1,
+					translatorPrefs: { attachSupplementary: false }
+				});
+				Zotero.Connector._processTranslatorPreferences();
+				return Zotero.Prefs.get('translators.attachSupplementary');
+			});
+			assert.isTrue(value);
+		});
+
+		it('ignores malformed translator preferences', async function() {
+			let prefs = await background(function() {
+				Zotero.Connector._processTranslatorPreferences({
+					translatorPrefsVersion: 1,
+					translatorPrefs: {
+						'../invalid': true,
+						attachSupplementary: { enabled: true },
+						supplementaryAsLink: false
+					}
+				});
+				return Zotero.Prefs.getAll();
+			});
+			assert.isFalse(prefs['translators.supplementaryAsLink']);
+			assert.notProperty(prefs, 'translators.../invalid');
+			assert.notProperty(prefs, 'translators.attachSupplementary');
+		});
+
+		it('refreshes the effective preference namespace in the offscreen translator', async function() {
+			await background(async function() {
+				Zotero.Connector._processTranslatorPreferences({
+					translatorPrefsVersion: 1,
+					translatorPrefs: { attachSupplementary: true }
+				});
+				await Zotero.OffscreenManager.sendMessage('Prefs.loadNamespace', ['translators.']);
+			});
+			assert.isTrue(await offscreen(function() {
+				return Zotero.Prefs.get('translators.attachSupplementary');
+			}));
+
+			await background(async function() {
+				Zotero.Connector._processTranslatorPreferences();
+				await Zotero.OffscreenManager.sendMessage('Prefs.loadNamespace', ['translators.']);
+			});
+			assert.isUndefined(await offscreen(function() {
+				try {
+					return Zotero.Prefs.get('translators.attachSupplementary');
+				}
+				catch (e) {
+					return undefined;
+				}
+			}));
 		});
 	});
 });

@@ -345,6 +345,10 @@ Zotero.Inject = {
 			Zotero.Prefs.getAsync('firstSaveToServer'), 
 			Zotero.Connector.checkIsOnline()
 		]);
+		// checkIsOnline() refreshes desktop-provided translator preferences in the
+		// background process. Reload the effective namespace in this page before a
+		// translator runs (and restore Connector-local values after disconnect).
+		await Zotero.Prefs.loadNamespace('translators.');
 		if (zoteroIsOnline || !firstSaveToServer) {
 			return true;
 		}

@@ -32,6 +32,9 @@ Zotero.VirtualOffscreenTranslate = class {
 	 */
 	static async create() {
 		let translate = new Zotero.VirtualOffscreenTranslate();
+		// The offscreen sandbox can outlive the background service worker and
+		// preloads translator preferences. Refresh them before every translation.
+		await translate.sendMessage('Prefs.loadNamespace', ['translators.']);
 		await translate.sendMessage('Translate.new');
 		return new Proxy(translate, {
 			get: (target, property, ...args) => {

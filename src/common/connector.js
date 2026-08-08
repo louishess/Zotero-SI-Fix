@@ -26,6 +26,8 @@
 // TODO: refactor this class
 Zotero.Connector = new function() {
 	const CONNECTOR_API_VERSION = 3;
+	const TRANSLATOR_PREFS_VERSION = 1;
+	const TRANSLATOR_PREFS_NAMESPACE = 'translators.';
 	
 	this.isOnline = (Zotero.isSafari || Zotero.isFirefox) ? false : null;
 	this.clientVersion = '';
@@ -41,6 +43,10 @@ Zotero.Connector = new function() {
 			await this.ping({});
 			return true;
 		} catch (e) {
+			// A failed ping cannot provide authoritative desktop preferences. Restore
+			// Connector-local values before deciding whether Zotero is merely busy or
+			// fully offline.
+			this._processTranslatorPreferences();
 			if (e.status != 0) {
 				Zotero.debug("Checking if Zotero is online returned a non-zero HTTP status.");
 				Zotero.logError(e);
@@ -86,6 +92,36 @@ Zotero.Connector = new function() {
 			const val = !!prefs[key];
 			Zotero.Connector.prefs[key] = val;
 		}
+		this._processTranslatorPreferences(prefs);
+	}
+
+	/**
+	 * Applies translator preferences supplied by a connected Zotero client as
+	 * runtime-only overrides. Connector-local values remain untouched and take
+	 * effect again when Zotero is unavailable.
+	 *
+	 * @param {Object} prefs Preferences returned from /connector/ping
+	 */
+	this._processTranslatorPreferences = function(prefs={}) {
+		let overrides = {};
+		if (prefs.translatorPrefsVersion === TRANSLATOR_PREFS_VERSION
+				&& prefs.translatorPrefs
+				&& typeof prefs.translatorPrefs === 'object'
+				&& !Array.isArray(prefs.translatorPrefs)) {
+			for (let [key, value] of Object.entries(prefs.translatorPrefs)) {
+				if (!/^[A-Za-z0-9._-]+$/.test(key)) {
+					Zotero.debug(`Connector: Ignoring invalid translator preference name ${JSON.stringify(key)}`);
+					continue;
+				}
+				if (!['boolean', 'number', 'string'].includes(typeof value)) {
+					Zotero.debug(`Connector: Ignoring translator preference ${key} with unsupported value type`);
+					continue;
+				}
+				overrides[TRANSLATOR_PREFS_NAMESPACE + key] = value;
+			}
+		}
+		Zotero.Prefs.replaceRuntimeOverrides(TRANSLATOR_PREFS_NAMESPACE, overrides);
+		Zotero.debug(`Connector: Loaded ${Object.keys(overrides).length} translator preference overrides from Zotero`);
 	}
 	
 	/**
@@ -182,6 +218,7 @@ Zotero.Connector = new function() {
 				}
 			}
 			if (xhr.status === 0) {
+				Zotero.Connector._processTranslatorPreferences();
 				if (Zotero.Connector.isOnline !== false) {
 					Zotero.Connector.isOnline = false;
 					Zotero.Connector.onStateChange(Zotero.Connector.clientVersion)

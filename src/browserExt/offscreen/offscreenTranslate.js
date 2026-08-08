@@ -64,6 +64,10 @@ Zotero.OffscreenTranslate = {
 	translateInstances: {},
 	selectCallbacks: {},
 	init: function() {
+		this.addMessageListener('Prefs.loadNamespace', ([namespaces]) => {
+			return Zotero.Prefs.loadNamespace(namespaces);
+		});
+
 		// Default passthrough handlers for translate methods
 		for (let method in Zotero.Translate.Web.prototype) {
 			this.addMessageListener(`Translate.${method}`, (translate, [...args]) => {
