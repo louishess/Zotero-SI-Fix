@@ -228,7 +228,9 @@ Zotero.ItemSaver._fetchAttachment = async function(attachment, tab, attemptBotPr
 	// Bot bypass is not supported in Safari (cannot intercept file download popup)
 	attemptBotProtectionBypass = attemptBotProtectionBypass && !Zotero.isSafari;
 	
-	let xhr = await Zotero.HTTP.request("GET", attachment.url, options);
+	let xhr = Zotero.BotBypass.requiresGenericUserAgent(attachment.url)
+		? await Zotero.BotBypass.requestWithGenericUserAgent("GET", attachment.url, options)
+		: await Zotero.HTTP.request("GET", attachment.url, options);
 	let validationError = this._validateResponse(attachment, xhr);
 	if (xhr.status >= 200 && xhr.status < 400 && !validationError) {
 		return xhr.response;

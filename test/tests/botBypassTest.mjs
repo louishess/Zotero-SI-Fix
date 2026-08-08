@@ -82,4 +82,25 @@ describe('BotBypass', function() {
 			assert.isTrue(result);
 		});
 	});
+
+	describe('requiresGenericUserAgent', function() {
+		it('should apply only to Figshare file downloads', async function() {
+			const result = await background(function() {
+				return {
+					file: Zotero.BotBypass.requiresGenericUserAgent(
+						'https://ndownloader.figshare.com/files/66503412'
+					),
+					page: Zotero.BotBypass.requiresGenericUserAgent(
+						'https://ndownloader.figshare.com/articles/66503412'
+					),
+					lookalike: Zotero.BotBypass.requiresGenericUserAgent(
+						'https://ndownloader.figshare.com.example.org/files/66503412'
+					)
+				};
+			});
+			assert.isTrue(result.file);
+			assert.isFalse(result.page);
+			assert.isFalse(result.lookalike);
+		});
+	});
 });

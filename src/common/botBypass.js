@@ -73,6 +73,54 @@ Zotero.BotBypass.isUrlWhitelisted = function(url) {
 	return false;
 };
 
+Zotero.BotBypass._nextRequestRuleID = 60000;
+
+Zotero.BotBypass.requiresGenericUserAgent = function(url) {
+	try {
+		let urlObj = new URL(url);
+		return urlObj.hostname === 'ndownloader.figshare.com'
+			&& urlObj.pathname.startsWith('/files/');
+	}
+	catch (e) {
+		return false;
+	}
+};
+
+Zotero.BotBypass.requestWithGenericUserAgent = async function(method, url, options) {
+	if (!browser.declarativeNetRequest?.updateSessionRules) {
+		return Zotero.HTTP.request(method, url, options);
+	}
+
+	let ruleID = this._nextRequestRuleID++;
+	await browser.declarativeNetRequest.updateSessionRules({
+		addRules: [{
+			id: ruleID,
+			priority: 1,
+			action: {
+				type: 'modifyHeaders',
+				requestHeaders: [{
+					header: 'User-Agent',
+					operation: 'set',
+					value: 'Zotero Connector'
+				}]
+			},
+			condition: {
+				regexFilter: '^https://ndownloader\\.figshare\\.com/files/',
+				resourceTypes: ['xmlhttprequest']
+			}
+		}]
+	});
+
+	try {
+		return await Zotero.HTTP.request(method, url, options);
+	}
+	finally {
+		await browser.declarativeNetRequest.updateSessionRules({
+			removeRuleIds: [ruleID]
+		});
+	}
+};
+
 Zotero.BotBypass.bypassAmazonCaptcha = async function(attachment, options) {
 	Zotero.debug(`Attempting Amazon CAPTCHA bot bypass for ${attachment.url}`);
 	options = Zotero.Utilities.deepCopy(options);
