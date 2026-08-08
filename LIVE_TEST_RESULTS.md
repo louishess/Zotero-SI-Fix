@@ -18,11 +18,13 @@ Test date: 2026-08-08
 
 - Detected **ACS Publications** as the preferred translator.
 - Saved DOI `10.1021/jacs.5c22031`.
-- Produced one main PDF and exactly one supplementary PDF.
-- Supplement URL: `/jacsat/article-supplement/5206327/pdf/ja5c22031_si_001/`.
+- Produced one main PDF candidate and exactly one supplementary PDF.
+- Restored the established main-PDF route: `/doi/pdf/10.1021/jacs.5c22031`.
+- Resolved the supplementary file through ACS Figshare: `https://ndownloader.figshare.com/files/66503412`.
 - Download mode emitted `application/pdf` with `snapshot=true`.
 - Link mode emitted the same file with `snapshot=false`.
-- The old DOI/RIS request still returns HTTP 403 in Chrome, confirming that the metadata-based ACS implementation is necessary.
+- The revised Connector downloaded all 9,911,839 SI bytes and transferred the PDF to Zotero.
+- The original ACS PDF route redirects to the current Silverchair PDF and opens successfully in the user's normal Chrome session. A clean isolated Chrome profile receives HTTP 403 because it lacks that ACS browser session.
 
 ## Requested Nature article
 
@@ -40,7 +42,7 @@ Test date: 2026-08-08
 ## Other validation
 
 - Patched Cell Press live article: one unique SI PDF, no duplicate, and the main item no longer fails on the obsolete PDF probe.
-- Full Connector regression suite: **102 passing**, 4 live diagnostics skipped by default.
+- Full Connector regression suite: **103 passing**, 4 live diagnostics skipped by default.
 - Translator syntax checks and `git diff --check`: passed.
 
 ## Remaining end-to-end check
@@ -48,8 +50,8 @@ Test date: 2026-08-08
 An explicitly authorized transfer test was subsequently run against the user's selected **My Library** destination. The imported items were left in place:
 
 - Nature: `saveItems` succeeded, followed by 22 successful `saveAttachment` calls—one main PDF and all 21 supplementary files.
-- ACS: `saveItems` succeeded, so the citation remains in My Library. ACS rejected both the main PDF and SI binary fetches before they could be sent to Zotero; its attachment-resolver fallback returned HTTP 500.
-- A bounded ACS browser-challenge bypass probe also timed out. The experimental whitelist change was reverted because it did not solve the transfer failure.
+- ACS SI transfer now succeeds through Figshare. Authorized personal-library runs transferred the requested JACS SI PDF plus PDF, XLSX, ZIP, and MP4 supplements from four additional ACS articles.
+- The exact JACS article's main PDF still cannot be transferred from the isolated Chrome test profile because ACS returns HTTP 403 there. The same restored `/doi/pdf/<DOI>` route opens the article PDF in the user's normal signed-in Chrome; the remaining combined-save check must use the unpacked build in that profile.
 
 ## Cell Press personal-library transfer
 
@@ -63,6 +65,6 @@ An explicitly authorized transfer test was subsequently run against the user's s
 - The main full-text PDF remained blocked by Cell Press; the SI transfer itself is confirmed functional.
 - The user deleted the incomplete first attempt before the successful replacement citation was written.
 
-The remaining ACS release issue is therefore binary delivery/authentication, not translator detection or SI discovery.
+The remaining ACS release check is one combined save from the unpacked Connector in the user's normal Chrome profile: the SI path is confirmed, and the restored article-PDF path is confirmed separately in that profile.
 
 The companion Zotero Desktop endpoint test is present, but its application build is currently blocked by upstream build scripts that do not quote workspace paths containing spaces. The Connector preference bridge itself is covered by the passing Connector tests.
