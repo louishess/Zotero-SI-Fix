@@ -1,0 +1,401 @@
+/*
+	Live diagnostic coverage for publisher translators.
+
+	Run explicitly with:
+	LIVE_PUBLISHER_TESTS=true HEADLESS=true npx mocha test/tests/livePublisherTest.mjs
+
+	These tests load the real Connector in Chrome for Testing and stub only the
+	final save-to-Zotero call. They intentionally use live publisher pages and
+	are therefore excluded from the normal test run.
+*/
+
+import {
+	Tab,
+	background,
+	delay,
+	offscreen,
+	stubConnectorCallMethod,
+	stubHTTPRequest
+} from '../support/utils.mjs';
+import { seedTranslatorPrefs } from '../support/puppeteerSetup.mjs';
+
+const PUBLISHER_TRANSLATOR_IDS = [
+	'938ebe32-2b2e-4349-a5b3-b3a05d3de627', // ACS Publications
+	'3bae3a55-f021-4b59-8a14-43701f336adf', // Silverchair
+	'6614a99-479a-4524-8e30-686e4d66663e', // Nature Publishing Group
+	'f26cfb71-efd7-47ae-a28c-d4d8852096bd' // Cell Press
+];
+
+const CASES = [
+	{
+		publisher: 'ACS',
+		label: ['ACS Publications', 'Silverchair'],
+		url: 'https://pubs.acs.org/jacsat/article/148/28/29684/5206327/Structural-Engineering-of-Cyanine-Dyes-to-Access'
+	},
+	{
+		publisher: 'ACS DOI redirect',
+		label: ['ACS Publications', 'Silverchair'],
+		url: 'https://pubs.acs.org/doi/10.1021/jacs.5c22031'
+	},
+	{
+		publisher: 'Nature',
+		label: 'Nature Publishing Group',
+		url: 'https://www.nature.com/articles/s41586-026-10843-7'
+	},
+	{
+		publisher: 'Cell Press',
+		label: 'Cell Press',
+		url: 'https://www.cell.com/heliyon/fulltext/S2405-8440(24)04671-1'
+	}
+];
+
+const runLive = process.env.LIVE_PUBLISHER_TESTS === 'true' ? describe : describe.skip;
+const supplementaryAsLink = process.env.LIVE_SUPPLEMENTARY_AS_LINK === 'true';
+const expectPublisherFixes = process.env.EXPECT_PUBLISHER_FIXES === 'true';
+const libraryTransfer = process.env.LIVE_LIBRARY_TRANSFER === 'true';
+const attachmentFetchOnly = process.env.LIVE_ATTACHMENT_FETCH_ONLY === 'true';
+
+async function stubLiveConnectorMethods(pingResponse) {
+	if (!libraryTransfer) {
+		return stubConnectorCallMethod({
+			ping: { response: pingResponse },
+			saveItems: { returnPayload: true },
+			getSelectedCollection: { response: {} }
+		});
+	}
+
+	await background((pingResponse) => {
+		let callMethod = Zotero.Connector.callMethod;
+		globalThis.__liveLibraryTransferCalls = [];
+		sinon.stub(Zotero.Connector, 'callMethod').callsFake(async function(options, payload, ...args) {
+			let method = typeof options === 'string' ? options : options.method;
+			if (method === 'ping') return pingResponse;
+
+			let call = { method };
+			if (method === 'saveItems') {
+				call.items = payload.items?.map(item => ({
+					title: item.title,
+					DOI: item.DOI
+				}));
+			}
+			else if (method === 'saveAttachment') {
+				try {
+					call.attachment = JSON.parse(options.headers['X-Metadata']);
+				}
+				catch (e) {
+					call.attachmentMetadataError = e.message;
+				}
+			}
+
+			try {
+				let response = await callMethod.call(this, options, payload, ...args);
+				call.success = true;
+				globalThis.__liveLibraryTransferCalls.push(call);
+				return response;
+			}
+			catch (e) {
+				call.success = false;
+				call.error = e.message;
+				call.status = e.status;
+				globalThis.__liveLibraryTransferCalls.push(call);
+				throw e;
+			}
+		});
+	}, pingResponse);
+
+	return () => background(() => {
+		Zotero.Connector.callMethod.restore();
+		delete globalThis.__liveLibraryTransferCalls;
+	});
+}
+
+async function waitForDetection(tab, url) {
+	await tab.navigate(url);
+	let challengeWasPresent = await tab.runInPage(() => document.title === 'Just a moment...');
+	if (challengeWasPresent) {
+		try {
+			await tab.page.waitForFunction(
+				() => document.title !== 'Just a moment...',
+				{ timeout: 45000 }
+			);
+			await tab.page.reload({ waitUntil: 'load' });
+		}
+		catch (e) {
+			// Preserve the challenge page in the diagnostic output instead of
+			// converting publisher bot protection into a translator failure.
+		}
+	}
+
+	let emptyResult = null;
+	for (let i = 0; i < 60; i++) {
+		let translators = await background((tabId) => {
+			let translatorInfo = Zotero.Connector_Browser._tabInfo[tabId]?.translators;
+			if (!translatorInfo) return null;
+			return translatorInfo.map(translator => ({
+				translatorID: translator.translatorID,
+				label: translator.label,
+				priority: translator.priority,
+				lastUpdated: translator.lastUpdated,
+				target: translator.target
+			}));
+		}, tab.tabId);
+		if (translators?.length) return translators;
+		if (translators) emptyResult = translators;
+		if (emptyResult && i >= 20) return emptyResult;
+		await delay(250);
+	}
+	throw new Error(`Timed out waiting for translator detection on ${url}`);
+}
+
+async function inspectPage(tab) {
+	return tab.runInPage(async () => {
+		let doi = document.querySelector('meta[name="citation_doi"]')?.content || null;
+		let acsDoiResolution = null;
+		if (location.hostname === 'pubs.acs.org' && doi) {
+			try {
+				let response = await fetch(`/doi/${doi}`, { credentials: 'include' });
+				acsDoiResolution = {
+					status: response.status,
+					url: response.url,
+					redirected: response.redirected,
+					contentType: response.headers.get('content-type')
+				};
+			}
+			catch (e) {
+				acsDoiResolution = { error: e.message };
+			}
+		}
+		return {
+			url: location.href,
+			title: document.title,
+			challengePage: document.title === 'Just a moment...',
+			doi,
+			pdf: document.querySelector('meta[name="citation_pdf_url"]')?.content || null,
+			acsDoiResolution,
+			acsModernSupplements: [...document.querySelectorAll('a[data-doctype="dataSupplementDoc"][href]')]
+				.map(link => ({ text: link.textContent.trim(), url: link.href })),
+			acsLegacySupplementCount: document.querySelectorAll('.article_content-left .suppl-anchor').length,
+			natureLegacySection: Boolean(document.getElementById('supplementary-information')),
+			natureModernSupplements: [...document.querySelectorAll('[data-test="supp-item"] a[data-test="supp-info-link"][href]')]
+				.map(link => ({ text: link.textContent.trim(), url: link.href }))
+				.filter(attachment => attachment.url.includes('media.springernature.com')),
+			natureFigureLinks: document.querySelectorAll('[data-test="supp-item"] a[href*="/figures/"]').length,
+			cellModernSupplements: [...document.querySelectorAll('#supplementary-material .core-supplementary-material .core-link a[href]')]
+				.map(link => ({ text: link.textContent.trim(), url: link.href })),
+			cellLegacySupplementCount: document.querySelectorAll('#main_supp dl dt').length
+		};
+	});
+}
+
+async function translate(tab, translatorLabel) {
+	return background(async (tabId, label) => {
+		let tabInfo = Zotero.Connector_Browser._tabInfo[tabId];
+		let labels = Array.isArray(label) ? label : [label];
+		let index = tabInfo?.translators?.findIndex(translator => labels.includes(translator.label)) ?? -1;
+		if (index < 0) return null;
+		let browserTab = await browser.tabs.get(tabId);
+		let translator = tabInfo.translators[index];
+		// Target the top frame directly. saveWithTranslator() broadcasts to all
+		// frames, and ad frames on live sites can return before the article frame.
+		return Zotero.Messaging.sendMessage(
+			'translate',
+			[tabInfo.instanceID, translator.translatorID, {}],
+			browserTab,
+			0
+		);
+	}, tab.tabId, translatorLabel);
+}
+
+function assertPublisherFix(testCase, result) {
+	if (testCase.publisher === 'ACS') {
+		assert.equal(result.translators[0]?.label, 'ACS Publications');
+		assert.lengthOf(result.items, 1);
+		assert.equal(result.items[0].DOI, '10.1021/jacs.5c22031');
+		let supplements = result.items[0].attachments.filter(attachment =>
+			attachment.url?.includes('/article-supplement/'));
+		assert.lengthOf(supplements, 1);
+		assert.equal(supplements[0].mimeType, 'application/pdf');
+		if (supplementaryAsLink) assert.isFalse(supplements[0].snapshot);
+	}
+	else if (testCase.publisher === 'Nature') {
+		assert.lengthOf(result.items, 1);
+		assert.equal(result.items[0].DOI, '10.1038/s41586-026-10843-7');
+		let supplements = result.items[0].attachments.filter(attachment =>
+			attachment.url?.includes('media.springernature.com/original/'));
+		assert.lengthOf(supplements, 21);
+		assert.lengthOf(supplements.filter(attachment => attachment.mimeType === 'application/pdf'), 3);
+		assert.lengthOf(supplements.filter(attachment => attachment.mimeType
+			=== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 18);
+		assert.isFalse(supplements.some(attachment => /\/figures\/\d+/.test(attachment.url)));
+		if (supplementaryAsLink) {
+			assert.isTrue(supplements.every(attachment => attachment.snapshot === false));
+		}
+	}
+	else if (testCase.publisher === 'Cell Press') {
+		assert.lengthOf(result.items, 1);
+		assert.equal(result.items[0].DOI, '10.1016/j.heliyon.2024.e28640');
+		let supplements = result.items[0].attachments.filter(attachment =>
+			attachment.url?.includes('/attachment/') && attachment.url?.endsWith('/mmc1.pdf'));
+		assert.lengthOf(supplements, 1);
+		assert.equal(supplements[0].mimeType, 'application/pdf');
+		if (supplementaryAsLink) assert.isFalse(supplements[0].snapshot);
+	}
+}
+
+function assertLibraryTransfer(testCase, result) {
+	let calls = result.libraryTransferCalls || [];
+	assert.lengthOf(calls.filter(call => call.method === 'saveItems' && call.success), 1);
+	let savedAttachments = calls.filter(call => call.method === 'saveAttachment' && call.success)
+		.map(call => call.attachment);
+	if (testCase.publisher === 'ACS') {
+		assert.lengthOf(savedAttachments.filter(attachment =>
+			attachment.url.includes('/article-supplement/')), 1);
+	}
+	else if (testCase.publisher === 'Nature') {
+		assert.lengthOf(savedAttachments.filter(attachment =>
+			attachment.url.includes('media.springernature.com/original/')), 21);
+	}
+}
+
+runLive('Live publisher translator diagnostics', function () {
+	this.timeout(120000);
+
+	let restoreConnectorCallMethod;
+
+	before(async function () {
+		await seedTranslatorPrefs(
+			worker,
+			PUBLISHER_TRANSLATOR_IDS,
+			process.env.PUBLISHER_TRANSLATOR_REVISION || null
+		);
+		let seededTranslators = await background(async (translatorIDs) => Promise.all(
+			translatorIDs.map(async (translatorID) => {
+				let translator = await Zotero.Translators.getWithoutCode(translatorID);
+				return {
+					translatorID,
+					lastUpdated: translator.lastUpdated,
+					target: translator.target,
+					codeLastUpdated: JSON.parse(translator.code.match(/^\s*{[\s\S]*?}\s*?[\r\n]/)[0]).lastUpdated
+				};
+			})
+		), PUBLISHER_TRANSLATOR_IDS);
+		console.log(`LIVE_SEEDED_TRANSLATORS ${JSON.stringify(seededTranslators)}`);
+		await background(async (supplementaryAsLink) => {
+			sinon.stub(Zotero.Connector, 'checkIsOnline').resolves(true);
+			Zotero.Connector._processTranslatorPreferences({
+				translatorPrefsVersion: 1,
+				translatorPrefs: {
+					attachSupplementary: true,
+					supplementaryAsLink
+				}
+			});
+			await Zotero.OffscreenManager.sendMessage('Prefs.loadNamespace', ['translators.']);
+		}, supplementaryAsLink);
+		let [backgroundPref, offscreenPref] = await Promise.all([
+			background(() => Zotero.Prefs.get('translators.attachSupplementary')),
+			offscreen(() => Zotero.Prefs.get('translators.attachSupplementary'))
+		]);
+		assert.isTrue(backgroundPref);
+		assert.isTrue(offscreenPref);
+		// Keep translator selection isolated from the user's cached translator
+		// versions while optionally allowing saveItems/saveAttachment through to
+		// the running Zotero client for an explicitly requested library transfer.
+		restoreConnectorCallMethod = await stubLiveConnectorMethods({
+			prefs: {
+				downloadAssociatedFiles: true,
+				translatorPrefsVersion: 1,
+				translatorPrefs: {
+					attachSupplementary: true,
+					supplementaryAsLink
+				}
+			}
+		});
+	});
+
+	after(async function () {
+		if (restoreConnectorCallMethod) await restoreConnectorCallMethod();
+		await background(async () => {
+			if (Zotero.Connector.checkIsOnline.restore) Zotero.Connector.checkIsOnline.restore();
+			Zotero.Connector._processTranslatorPreferences();
+			await Zotero.OffscreenManager.sendMessage('Prefs.loadNamespace', ['translators.']);
+		});
+	});
+
+	for (let testCase of CASES) {
+		it(testCase.publisher, async function () {
+			let tab = new Tab();
+			let restoreHTTP;
+			await tab.init('about:blank');
+			if (libraryTransfer) {
+				await background(() => {
+					globalThis.__liveLibraryTransferCalls = [];
+				});
+			}
+			try {
+				let translators = await waitForDetection(tab, testCase.url);
+				let seededAfterDetection = await background(async (translatorID) => {
+					let translator = await Zotero.Translators.getWithoutCode(translatorID);
+					return {
+						lastUpdated: translator?.lastUpdated,
+						codeLastUpdated: translator?.code
+							? JSON.parse(translator.code.match(/^\s*{[\s\S]*?}\s*?[\r\n]/)[0]).lastUpdated
+							: null
+					};
+				}, Array.isArray(testCase.label)
+					? PUBLISHER_TRANSLATOR_IDS[0]
+					: translators.find(translator => translator.label === testCase.label)?.translatorID);
+				let page = await inspectPage(tab);
+				if (testCase.publisher === 'Cell Press' && page.pdf
+						&& process.env.PUBLISHER_TRANSLATOR_REVISION) {
+					restoreHTTP = await stubHTTPRequest({ [page.pdf]: {} });
+				}
+				if (attachmentFetchOnly) {
+					let url = page.acsModernSupplements[0]?.url;
+					assert.isString(url, 'ACS supplementary URL is present');
+					let fetchResult = await background(async (tabId, referrer, url) => {
+						let browserTab = await browser.tabs.get(tabId);
+						let attachment = {
+							url,
+							referrer,
+							mimeType: 'application/pdf'
+						};
+						let data = await Zotero.ItemSaver._fetchAttachment(attachment, browserTab);
+						return { byteLength: data.byteLength, finalURL: attachment.url };
+					}, tab.tabId, page.url, url);
+					console.log(`LIVE_ATTACHMENT_FETCH_RESULT ${JSON.stringify(fetchResult)}`);
+					assert.isAbove(fetchResult.byteLength, 0);
+					return;
+				}
+				let items = await translate(tab, testCase.label);
+				let libraryTransferCalls = libraryTransfer
+					? await background(() => globalThis.__liveLibraryTransferCalls)
+					: null;
+				let result = {
+					publisher: testCase.publisher,
+					translators,
+					seededAfterDetection,
+					page,
+					libraryTransferCalls,
+					items: items?.map(item => ({
+						title: item.title,
+						DOI: item.DOI,
+						url: item.url,
+						attachments: item.attachments?.map(attachment => ({
+							title: attachment.title,
+							url: attachment.url,
+							mimeType: attachment.mimeType,
+							snapshot: attachment.snapshot
+						}))
+					})) || null
+				};
+				console.log(`LIVE_PUBLISHER_RESULT ${JSON.stringify(result)}`);
+				if (expectPublisherFixes) assertPublisherFix(testCase, result);
+				if (libraryTransfer) assertLibraryTransfer(testCase, result);
+			}
+			finally {
+				if (restoreHTTP) await restoreHTTP();
+				await tab.close();
+			}
+		});
+	}
+});

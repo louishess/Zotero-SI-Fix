@@ -26,13 +26,16 @@
 import puppeteer from 'puppeteer';
 import fs from 'fs/promises';
 import path from 'path';
+import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
+import { promisify } from 'util';
 import { assert } from 'chai';
 
 globalThis.assert = assert;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const execFileAsync = promisify(execFile);
 
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const EXTENSION_PATH = path.resolve(PROJECT_ROOT, 'build/manifestv3');
@@ -42,7 +45,7 @@ const SEEDED_TRANSLATOR_IDS = [
 	'951c027d-74ac-47d4-a107-9c3069ab7b48' // COinS
 ];
 
-async function getTranslatorSeedData(translatorIDs) {
+async function getTranslatorSeedData(translatorIDs, sourceRevision=null) {
 	const translatorDir = path.join(PROJECT_ROOT, 'src/zotero/translators');
 	const translatorIDSet = new Set(translatorIDs);
 	const translatorMetadata = [];
@@ -57,7 +60,22 @@ async function getTranslatorSeedData(translatorIDs) {
 	
 	for (let file of files) {
 		if (!file.endsWith('.js')) continue;
-		let code = await fs.readFile(path.join(translatorDir, file), 'utf8');
+		let code;
+		if (sourceRevision) {
+			try {
+				({ stdout: code } = await execFileAsync(
+					'git',
+					['-C', translatorDir, 'show', `${sourceRevision}:${file}`],
+					{ maxBuffer: 10 * 1024 * 1024 }
+				));
+			}
+			catch (e) {
+				continue;
+			}
+		}
+		else {
+			code = await fs.readFile(path.join(translatorDir, file), 'utf8');
+		}
 		let metadataMatch = /^\s*{[\S\s]*?}\s*?[\r\n]/.exec(code);
 		if (!metadataMatch) continue;
 		let metadata = JSON.parse(metadataMatch[0]);
@@ -74,16 +92,20 @@ async function getTranslatorSeedData(translatorIDs) {
 	return { translatorMetadata, translatorCode };
 }
 
-async function seedTranslatorPrefs(worker) {
+export async function seedTranslatorPrefs(
+	worker,
+	translatorIDs = SEEDED_TRANSLATOR_IDS,
+	sourceRevision = null
+) {
 	let seedData;
 	try {
-		seedData = await getTranslatorSeedData(SEEDED_TRANSLATOR_IDS);
+		seedData = await getTranslatorSeedData(translatorIDs, sourceRevision);
 	}
 	catch (e) {
 		console.warn(`Skipping translator pref seeding: ${e.message}`);
 		return;
 	}
-	await worker.evaluate(async ({ translatorMetadata, translatorCode }) => {
+	const applySeedData = async ({ translatorMetadata, translatorCode }) => {
 		let existingMetadata = Zotero.Prefs.get('translatorMetadata');
 		if (!Array.isArray(existingMetadata)) existingMetadata = [];
 		let metadataByID = new Map(existingMetadata.map(metadata => [metadata.translatorID, metadata]));
@@ -103,10 +125,16 @@ async function seedTranslatorPrefs(worker) {
 				translator.init(metadata);
 			}
 			else {
-				Zotero.Translators._loadTranslator(new Zotero.Translator(metadata));
+				translator = new Zotero.Translator(metadata);
+				Zotero.Translators._loadTranslator(translator);
 			}
+			// A prior repository/client refresh may have populated translator.code.
+			// Replace the in-memory value as well as the stored preference so live
+			// diagnostics execute the explicitly seeded source.
+			translator.code = translatorCode[metadata.translatorID];
 		}
-	}, seedData);
+	};
+	await worker.evaluate(applySeedData, seedData);
 }
 
 export async function mochaGlobalSetup() {
@@ -218,4 +246,4 @@ export async function mochaGlobalTeardown() {
 	else if (noQuit) {
 		console.log('Skipping browser close due to NO_QUIT=true.');
 	}
-} 
+}
