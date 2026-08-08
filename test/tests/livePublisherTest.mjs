@@ -45,7 +45,10 @@ const CASES = [
 	{
 		publisher: 'Cell Press',
 		label: 'Cell Press',
-		url: 'https://www.cell.com/heliyon/fulltext/S2405-8440(24)04671-1'
+		url: process.env.LIVE_CELL_PRESS_URL
+			|| 'https://www.cell.com/heliyon/fulltext/S2405-8440(24)04671-1',
+		expectedDOI: process.env.LIVE_CELL_PRESS_DOI || '10.1016/j.heliyon.2024.e28640',
+		expectedSupplementCount: Number(process.env.LIVE_CELL_PRESS_SUPPLEMENT_COUNT || 1)
 	}
 ];
 
@@ -233,12 +236,15 @@ function assertPublisherFix(testCase, result) {
 	}
 	else if (testCase.publisher === 'Cell Press') {
 		assert.lengthOf(result.items, 1);
-		assert.equal(result.items[0].DOI, '10.1016/j.heliyon.2024.e28640');
+		assert.equal(result.items[0].DOI, testCase.expectedDOI);
 		let supplements = result.items[0].attachments.filter(attachment =>
-			attachment.url?.includes('/attachment/') && attachment.url?.endsWith('/mmc1.pdf'));
-		assert.lengthOf(supplements, 1);
-		assert.equal(supplements[0].mimeType, 'application/pdf');
-		if (supplementaryAsLink) assert.isFalse(supplements[0].snapshot);
+			attachment.url?.includes('/attachment/')
+				|| attachment.url?.includes('ars.els-cdn.com/content/image/'));
+		assert.lengthOf(supplements, testCase.expectedSupplementCount);
+		assert.equal(new Set(supplements.map(attachment => attachment.url)).size, supplements.length);
+		if (supplementaryAsLink) {
+			assert.isTrue(supplements.every(attachment => attachment.snapshot === false));
+		}
 	}
 }
 
@@ -254,6 +260,12 @@ function assertLibraryTransfer(testCase, result) {
 	else if (testCase.publisher === 'Nature') {
 		assert.lengthOf(savedAttachments.filter(attachment =>
 			attachment.url.includes('media.springernature.com/original/')), 21);
+	}
+	else if (testCase.publisher === 'Cell Press') {
+		assert.lengthOf(savedAttachments.filter(attachment =>
+			attachment.url.includes('/attachment/')
+				|| attachment.url.includes('ars.els-cdn.com/content/image/')),
+		testCase.expectedSupplementCount);
 	}
 }
 
@@ -350,20 +362,30 @@ runLive('Live publisher translator diagnostics', function () {
 					restoreHTTP = await stubHTTPRequest({ [page.pdf]: {} });
 				}
 				if (attachmentFetchOnly) {
-					let url = page.acsModernSupplements[0]?.url;
-					assert.isString(url, 'ACS supplementary URL is present');
-					let fetchResult = await background(async (tabId, referrer, url) => {
+					let urls;
+					if (testCase.publisher === 'Cell Press') {
+						let pii = page.url.match(/\/(?:abstract|fulltext)\/(S[^/?#]+)/i)?.[1]
+							.replace(/[^a-z0-9]/gi, '');
+						urls = page.cellModernSupplements.map(attachment =>
+							'https://ars.els-cdn.com/content/image/1-s2.0-'
+								+ pii + '-' + attachment.url.split('/').pop());
+					}
+					else {
+						urls = page.acsModernSupplements.slice(0, 1).map(attachment => attachment.url);
+					}
+					assert.isAbove(urls.length, 0, 'Supplementary URL is present');
+					let fetchResults = await background(async (tabId, referrer, urls) => {
 						let browserTab = await browser.tabs.get(tabId);
-						let attachment = {
-							url,
-							referrer,
-							mimeType: 'application/pdf'
-						};
-						let data = await Zotero.ItemSaver._fetchAttachment(attachment, browserTab);
-						return { byteLength: data.byteLength, finalURL: attachment.url };
-					}, tab.tabId, page.url, url);
-					console.log(`LIVE_ATTACHMENT_FETCH_RESULT ${JSON.stringify(fetchResult)}`);
-					assert.isAbove(fetchResult.byteLength, 0);
+						let results = [];
+						for (let url of urls) {
+							let attachment = { url, referrer, mimeType: 'application/pdf' };
+							let data = await Zotero.ItemSaver._fetchAttachment(attachment, browserTab);
+							results.push({ byteLength: data.byteLength, finalURL: attachment.url });
+						}
+						return results;
+					}, tab.tabId, page.url, urls);
+					console.log(`LIVE_ATTACHMENT_FETCH_RESULT ${JSON.stringify(fetchResults)}`);
+					assert.isTrue(fetchResults.every(result => result.byteLength > 0));
 					return;
 				}
 				let items = await translate(tab, testCase.label);
