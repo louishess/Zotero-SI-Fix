@@ -103,14 +103,26 @@ EXTENSION_TRANSLATE_DIR="$SRCDIR/translate"
 EXTENSION_UTILITIES_DIR="$SRCDIR/utilities"
 EXTENSION_SKIN_DIR="$SRCDIR/zotero/chrome/skin/default/zotero"
 
-ICONS="$EXTENSION_SKIN_DIR/treeitem*png $EXTENSION_SKIN_DIR/treesource-collection.png $EXTENSION_SKIN_DIR/zotero-new-z-16px.png  \
-    $SRCDIR/common/images/*"
-IMAGES="$EXTENSION_SKIN_DIR/progress_arcs.png \
-	$EXTENSION_SKIN_DIR/cross.png \
-	$EXTENSION_SKIN_DIR/tick.png $EXTENSION_SKIN_DIR/tick@2x.png \
-	$EXTENSION_SKIN_DIR/spinner-16px.png $EXTENSION_SKIN_DIR/spinner-16px@2x.png \
-	$EXTENSION_SKIN_DIR/treesource-library.png"
-PREFS_IMAGES="$EXTENSION_SKIN_DIR/prefs-general.png $EXTENSION_SKIN_DIR/prefs-advanced.png $EXTENSION_SKIN_DIR/prefs-proxies.png"
+ICONS=(
+	"$EXTENSION_SKIN_DIR"/treeitem*png
+	"$EXTENSION_SKIN_DIR/treesource-collection.png"
+	"$EXTENSION_SKIN_DIR/zotero-new-z-16px.png"
+	"$SRCDIR"/common/images/*
+)
+IMAGES=(
+	"$EXTENSION_SKIN_DIR/progress_arcs.png"
+	"$EXTENSION_SKIN_DIR/cross.png"
+	"$EXTENSION_SKIN_DIR/tick.png"
+	"$EXTENSION_SKIN_DIR/tick@2x.png"
+	"$EXTENSION_SKIN_DIR/spinner-16px.png"
+	"$EXTENSION_SKIN_DIR/spinner-16px@2x.png"
+	"$EXTENSION_SKIN_DIR/treesource-library.png"
+)
+PREFS_IMAGES=(
+	"$EXTENSION_SKIN_DIR/prefs-general.png"
+	"$EXTENSION_SKIN_DIR/prefs-advanced.png"
+	"$EXTENSION_SKIN_DIR/prefs-proxies.png"
+)
 
 LIBS=()
 	
@@ -205,8 +217,8 @@ function copyResources {
 		fi
 		
 		if [ -f $code/zotero/connector.json ]; then
-			mkdir -p $target_dir
-			cp $code/zotero/connector.json "$target_dir/messages.json"
+			mkdir -p "$target_dir"
+			cp "$code/zotero/connector.json" "$target_dir/messages.json"
 		fi
 	done
 	popd > /dev/null
@@ -255,7 +267,7 @@ if [[ $BUILD_BROWSER_EXT == 1 ]]; then
 	# Copy images for Chrome
 	rm -rf "$BUILD_DIR/browserExt/images"
 	mkdir "$BUILD_DIR/browserExt/images"
-	cp $ICONS $IMAGES $PREFS_IMAGES "$BUILD_DIR/browserExt/images"
+	cp "${ICONS[@]}" "${IMAGES[@]}" "${PREFS_IMAGES[@]}" "$BUILD_DIR/browserExt/images"
 	cp "$CWD/icons/Icon-16.png" "$CWD/icons/Icon-32.png" "$CWD/icons/Icon-64.png" "$CWD/icons/Icon-128.png" "$BUILD_DIR/browserExt"
 	
 	copyResources 'browserExt'
@@ -263,10 +275,10 @@ fi
 
 # Make separate Manifest v3, Firefox, and Safari WebExtension directories
 if [[ $BUILD_BROWSER_EXT == 1 ]]; then
-	rsync -a $BUILD_DIR/browserExt/ $BUILD_DIR/manifestv3/
-	rsync -a $BUILD_DIR/browserExt/ $BUILD_DIR/safari/
+	rsync -a "$BUILD_DIR/browserExt/" "$BUILD_DIR/manifestv3/"
+	rsync -a "$BUILD_DIR/browserExt/" "$BUILD_DIR/safari/"
 	rsync -r "$SRCDIR/safari/" "$BUILD_DIR/safari/"
-	mv $BUILD_DIR/browserExt $BUILD_DIR/firefox
+	mv "$BUILD_DIR/browserExt" "$BUILD_DIR/firefox"
 fi
 
 if [[ $BUILD_BROWSER_EXT == 1 ]]; then
@@ -291,15 +303,15 @@ if [[ $BUILD_BROWSER_EXT == 1 ]]; then
 	# Use larger icons where available in Chrome, which actually wants 19px icons
 	# 2x
 	for img in "$BUILD_DIR"/manifestv3/images/*2x.png; do
-		cp $img `echo $img | sed 's/@2x//'`
+		cp "$img" "${img/@2x/}"
 	done
 	## 2.5x
 	for img in "$BUILD_DIR"/manifestv3/images/*48px.png; do
-		cp $img `echo $img | sed 's/@48px//'`
+		cp "$img" "${img/@48px/}"
 	done
 	
 	# Remove the 'applications' property used by Firefox from the manifest
-	pushd $BUILD_DIR/manifestv3 > /dev/null
+	pushd "$BUILD_DIR/manifestv3" > /dev/null
 	cat manifest.json | jq '. |= del(.applications)' > manifest.json-tmp
 	mv manifest.json-tmp manifest.json
 	popd > /dev/null
@@ -308,11 +320,11 @@ if [[ $BUILD_BROWSER_EXT == 1 ]]; then
 	
 	# TEMP: Copy 2x icons to 1x until getImageSrc() is updated to detect HiDPI
 	for img in "$BUILD_DIR"/firefox/images/*2x.png; do
-		cp $img `echo $img | sed 's/@2x//'`
+		cp "$img" "${img/@2x/}"
 	done
 	## 2.5x
 	for img in "$BUILD_DIR"/firefox/images/*48px.png; do
-		cp $img `echo $img | sed 's/@48px//'`
+		cp "$img" "${img/@48px/}"
 	done
 
 	# Safari WebExtension modifications
@@ -329,18 +341,18 @@ if [[ $BUILD_BROWSER_EXT == 1 ]]; then
 	# Require Safari 18.4, the first version that can load Developer ID-signed web extensions.
 	# Older Safari blocks the extension at the code-signing layer before reading the manifest,
 	# so this is for accurate messaging rather than gating.
-	pushd $BUILD_DIR/safari > /dev/null
+	pushd "$BUILD_DIR/safari" > /dev/null
 	cat manifest.json | jq '. |= del(.applications) | .declarative_net_request = {"rule_resources":[{"id":"styleIntercept","enabled":false,"path":"styleInterceptRules.json"}]} | .permissions += ["declarativeNetRequestWithHostAccess"] | .browser_specific_settings = {"safari":{"strict_min_version":"18.4"}}' > manifest.json-tmp
 	mv manifest.json-tmp manifest.json
 	popd > /dev/null
 
 	# TEMP: Copy 2x icons to 1x until getImageSrc() is updated to detect HiDPI
 	for img in "$BUILD_DIR"/safari/images/*2x.png; do
-		cp $img `echo $img | sed 's/@2x//'`
+		cp "$img" "${img/@2x/}"
 	done
 	## 2.5x
 	for img in "$BUILD_DIR"/safari/images/*48px.png; do
-		cp $img `echo $img | sed 's/@48px//'`
+		cp "$img" "${img/@48px/}"
 	done
 
 	addUTF8BOMToSafariScripts
