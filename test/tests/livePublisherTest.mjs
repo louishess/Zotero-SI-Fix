@@ -30,7 +30,10 @@ const CASES = [
 	{
 		publisher: 'ACS',
 		label: ['ACS Publications', 'Silverchair'],
-		url: 'https://pubs.acs.org/jacsat/article/148/28/29684/5206327/Structural-Engineering-of-Cyanine-Dyes-to-Access'
+		url: process.env.LIVE_ACS_URL
+			|| 'https://pubs.acs.org/jacsat/article/148/28/29684/5206327/Structural-Engineering-of-Cyanine-Dyes-to-Access',
+		expectedDOI: process.env.LIVE_ACS_DOI || '10.1021/jacs.5c22031',
+		expectedSupplementCount: Number(process.env.LIVE_ACS_SUPPLEMENT_COUNT || 1)
 	},
 	{
 		publisher: 'ACS DOI redirect',
@@ -57,6 +60,7 @@ const supplementaryAsLink = process.env.LIVE_SUPPLEMENTARY_AS_LINK === 'true';
 const expectPublisherFixes = process.env.EXPECT_PUBLISHER_FIXES === 'true';
 const libraryTransfer = process.env.LIVE_LIBRARY_TRANSFER === 'true';
 const attachmentFetchOnly = process.env.LIVE_ATTACHMENT_FETCH_ONLY === 'true';
+const requirePrimaryPDF = process.env.LIVE_REQUIRE_PRIMARY_PDF === 'true';
 
 async function stubLiveConnectorMethods(pingResponse) {
 	if (!libraryTransfer) {
@@ -213,12 +217,14 @@ function assertPublisherFix(testCase, result) {
 	if (testCase.publisher === 'ACS') {
 		assert.equal(result.translators[0]?.label, 'ACS Publications');
 		assert.lengthOf(result.items, 1);
-		assert.equal(result.items[0].DOI, '10.1021/jacs.5c22031');
+		assert.equal(result.items[0].DOI, testCase.expectedDOI);
 		let supplements = result.items[0].attachments.filter(attachment =>
-			attachment.url?.includes('/article-supplement/'));
-		assert.lengthOf(supplements, 1);
-		assert.equal(supplements[0].mimeType, 'application/pdf');
-		if (supplementaryAsLink) assert.isFalse(supplements[0].snapshot);
+			attachment.url?.includes('/article-supplement/')
+				|| attachment.url?.includes('ndownloader.figshare.com/files/'));
+		assert.lengthOf(supplements, testCase.expectedSupplementCount);
+		if (supplementaryAsLink) {
+			assert.isTrue(supplements.every(attachment => attachment.snapshot === false));
+		}
 	}
 	else if (testCase.publisher === 'Nature') {
 		assert.lengthOf(result.items, 1);
@@ -253,9 +259,17 @@ function assertLibraryTransfer(testCase, result) {
 	assert.lengthOf(calls.filter(call => call.method === 'saveItems' && call.success), 1);
 	let savedAttachments = calls.filter(call => call.method === 'saveAttachment' && call.success)
 		.map(call => call.attachment);
+	if (requirePrimaryPDF) {
+		assert.lengthOf(savedAttachments.filter(attachment =>
+			attachment.contentType === 'application/pdf'
+				&& !attachment.url.includes('ndownloader.figshare.com/files/')),
+		1, 'primary article PDF was transferred');
+	}
 	if (testCase.publisher === 'ACS') {
 		assert.lengthOf(savedAttachments.filter(attachment =>
-			attachment.url.includes('/article-supplement/')), 1);
+			attachment.url.includes('/article-supplement/')
+				|| attachment.url.includes('ndownloader.figshare.com/files/')),
+		testCase.expectedSupplementCount);
 	}
 	else if (testCase.publisher === 'Nature') {
 		assert.lengthOf(savedAttachments.filter(attachment =>
@@ -371,7 +385,9 @@ runLive('Live publisher translator diagnostics', function () {
 								+ pii + '-' + attachment.url.split('/').pop());
 					}
 					else {
-						urls = page.acsModernSupplements.slice(0, 1).map(attachment => attachment.url);
+						urls = process.env.LIVE_ATTACHMENT_FETCH_URL
+							? [process.env.LIVE_ATTACHMENT_FETCH_URL]
+							: page.acsModernSupplements.slice(0, 1).map(attachment => attachment.url);
 					}
 					assert.isAbove(urls.length, 0, 'Supplementary URL is present');
 					let fetchResults = await background(async (tabId, referrer, urls) => {
