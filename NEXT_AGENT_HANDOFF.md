@@ -7,7 +7,7 @@
 - Publisher translators: <https://github.com/louishess/translators/tree/fix/supplementary-attachments>
   - tip: `0d77dbaf1541f31bf3dac73611fefa060053f777`
 - Zotero Desktop preference handoff: <https://github.com/louishess/zotero/tree/fix/supplementary-preference-bridge>
-  - tip: `1cec11b73303463809d8da263f123c42a957e5dd`
+  - tip: `acf089d99` (preference bridge plus the latest ACS/Nature/Cell Press translator pin)
 - Connector-compatible Zotero translator pin: <https://github.com/louishess/zotero/tree/fix/connector-supplementary-translators>
   - tip: `04d0ab8daaf170b4207a820207cde2461279eb6e`
 
@@ -33,6 +33,14 @@
 - ACS PDF/XLSX/ZIP/MP4 SI transfers all passed against live articles and the user's Zotero library. Broader issue-page selection still lacks a complete live multiple-item test.
 
 ## Safe tests for the next agent
+
+Runtime preference names are namespace-dependent:
+
+- Zotero Desktop Config Editor: `extensions.zotero.translators.attachSupplementary=true`
+- Connector Config Editor fallback: `translators.attachSupplementary=true`
+- Set the corresponding `supplementaryAsLink` preference to `false` for actual downloads.
+
+Verify that the running patched Zotero Desktop returns `translatorPrefsVersion: 1` and `translatorPrefs.attachSupplementary: true` from `/connector/ping`. If those fields are absent, the stock Zotero application is running and the universal bridge is inactive.
 
 From the Connector repository:
 

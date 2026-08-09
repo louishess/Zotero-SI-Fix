@@ -2,6 +2,14 @@
 
 Test date: 2026-08-08
 
+## Required runtime configuration
+
+- In Zotero Desktop's Config Editor, set `extensions.zotero.translators.attachSupplementary` to `true`.
+- For downloaded files rather than link-only attachments, keep `extensions.zotero.translators.supplementaryAsLink` set to `false`.
+- The patched Zotero Desktop build is required. Its `/connector/ping` response supplies `translatorPrefsVersion: 1` and the translator preferences to Chrome.
+- In the Connector's own Config Editor, the equivalent local fallback key is `translators.attachSupplementary` (without the `extensions.zotero.` prefix).
+- A stock Zotero Desktop build does not provide the preference handoff and may also serve the older publisher translators.
+
 ## How the test was run
 
 - Built the modified Manifest V3 Connector with `./build.sh -d`.
