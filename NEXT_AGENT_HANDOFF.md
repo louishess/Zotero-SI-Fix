@@ -15,11 +15,17 @@ The patched Zotero Desktop client is already built on this machine. A rebuild is
 - Desktop source: `/Users/louishess/Developer/zotero-si-desktop`
 - Built application: `/Users/louishess/Developer/zotero-si-desktop/app/staging/Zotero.app`
 - Desktop branch: `fix/supplementary-preference-bridge`
-- Desktop revision: `acf089d99`
+- Desktop revision: `5002c8318`
 - Connector source: `/Users/louishess/Desktop/Zotero Modification/Zotero SI Fix`
 - Unpacked Chrome build: `/Users/louishess/Desktop/Zotero Modification/Zotero SI Fix/build/manifestv3`
 - Connector branch: `fix/supplementary-preference-bridge`
-- Connector revision before this handoff update: `cc813bd`
+- Connector revision before this handoff update: `c9d4b55`
+
+The existing staged Desktop application contains the preference bridge and the
+previous ACS, Nature, and Cell Press fixes. The Desktop source branch now also
+pins the RSC, Science, and Wiley translator changes described below. Rebuild
+Desktop (or use a Connector test that explicitly seeds the forked translators)
+before a real-library test of these three newer publisher changes.
 
 Quit the release Zotero application before launching the patched Desktop client. Chrome should have the store-installed Connector disabled and the unpacked build above enabled.
 
@@ -34,11 +40,11 @@ The running patched client has already been verified to return `translatorPrefsV
 
 - Connector integration: <https://github.com/louishess/Zotero-SI-Fix/tree/fix/supplementary-preference-bridge>
 - Publisher translators: <https://github.com/louishess/translators/tree/fix/supplementary-attachments>
-  - current tip: `45d4b951`
+  - current tip: `70e15ee7`
 - Zotero Desktop preference handoff: <https://github.com/louishess/zotero/tree/fix/supplementary-preference-bridge>
-  - current tip: `acf089d99`
+  - current tip: `5002c8318`
 - Connector-compatible Zotero translator pin: <https://github.com/louishess/zotero/tree/fix/connector-supplementary-translators>
-  - current tip: `b722f5c39`
+  - current tip: `4c05017a6`
 
 ## Universal functionality now working
 
@@ -48,7 +54,7 @@ The running patched client has already been verified to return `translatorPrefsV
 - With the preference disabled, publisher translations retain their ordinary citation and main-PDF behavior without SI.
 - With it enabled, a publisher translator can append SI descriptors in download mode or link-only mode.
 - Final normal-profile testing retrieved both the main article PDF and SI for representative Nature, Cell Press, and ACS articles.
-- The non-live Connector regression suite passes: 103 tests, with four opt-in live diagnostics skipped by default.
+- The non-live Connector regression suite passes: 106 tests, with nine opt-in live diagnostics skipped by default.
 
 ## Publisher fixes, easiest to hardest
 
@@ -102,6 +108,73 @@ What worked:
 Live result for `10.1021/jacs.5c22031`: the normal browser profile retrieved the main article PDF through ACS and the SI PDF through Figshare. Additional live transfers covered mixed PDF, XLSX, ZIP, and MP4 SI.
 
 General lesson: after a full publisher-platform migration, treat detection, metadata, primary PDF, SI discovery, and binary delivery as separate layers. Repair and test each layer independently.
+
+## Additional publisher compatibility prepared in this session
+
+These changes are intentionally translator-only. No main-article PDF builder,
+download route, or Connector network policy was changed.
+
+### RSC Journals — live descriptor pass
+
+The supplied RSC article is a positive SI example:
+
+- URL: `https://pubs.rsc.org/ma/article/doi/10.1039/D6MA00514D/1287895/Casuarina-Derived-Carbon-Dots-for-Multifunctional?searchresult=1`
+- DOI: `10.1039/D6MA00514D`
+- Main PDF: existing Embedded Metadata descriptor at the RSC `/article-pdf/doi/` route
+- SI: three MP4 files at `/article-supplement/1287895/mp4/...`
+
+The RSC translator now recognizes the current `/ma/article/doi/10.1039/...`
+route, discovers both current and legacy SI links, deduplicates normalized URLs,
+infers file type from RSC's route segment, and obeys both supplementary
+preferences. An isolated live Connector run returned one item with the existing
+main PDF and all three MP4 SI descriptors. Deterministic helper coverage also
+passes in download and link-only modes.
+
+Translator commit: `4e3ecd66` (`RSC: Attach current supplementary files`).
+
+### Wiley Online Library — translator fix validated; full isolated save blocked upstream
+
+The user-supplied Wiley article `10.1002/cbf.70276` currently exposes no
+Supporting Information section or download links, so it is a valid zero-SI
+regression case rather than a positive transfer case.
+
+Positive control: `https://onlinelibrary.wiley.com/doi/10.1111/tpj.14950`
+currently exposes one DOCX and one XLSX through Wiley's
+`/action/downloadSupplement` endpoint. The translator now reads the official
+supporting-information file table, deduplicates URLs, assigns known MIME types,
+and leaves unknown formats link-only. Its existing `/doi/pdfdirect/` main-PDF
+logic is untouched.
+
+The positive page and file URLs were verified live, and deterministic descriptor
+tests pass. A full isolated Connector translation returned no item before the
+new SI helper ran, consistent with publisher metadata-request blocking. Recheck
+with the user's normal browser session before changing any metadata or PDF path.
+
+Translator commit: `70e15ee7` (`Wiley: Attach supporting information from article file tables`).
+
+### Science.org — Atypon, not Elsevier
+
+The supplied `science.org` URL is an AAAS Science article on the Atypon
+platform. It is not an Elsevier/ScienceDirect page, so neither the Cell Press nor
+ScienceDirect translator should be changed for it.
+
+The supplied article `10.1126/science.aef8874` currently exposes no SI container
+or `/doi/suppl/` link; an inferred `_sm.pdf` path redirects to the article. Keep
+it as a zero-SI regression case unless AAAS later publishes files.
+
+Positive control: `https://www.science.org/doi/10.1126/science.adt5229`
+currently exposes a PDF and ZIP under `/doi/suppl/`. The Atypon translator now
+adds a narrow Science.org-only extractor for concrete supplementary-material
+entries, with URL deduplication, MIME mapping, preference gating, and safe
+link-only fallback. The existing `buildPdfUrl()` main-PDF logic is untouched.
+
+The positive page and SI endpoints were verified live, and deterministic helper
+tests pass. In isolated Chrome, the pre-existing Atypon metadata POST to
+`https://www.science.org/action/downloadCitation` returned HTTP 403 before item
+creation. Treat that as a normal-profile metadata/access test, not evidence that
+the new SI selector or the working PDF route should be replaced.
+
+Translator commit: `f3a65dab` (`Science: Attach current supplementary files`).
 
 ## Workflow for adding another publisher
 
@@ -168,7 +241,33 @@ cd src/zotero/translators
 node .bin/check-syntax.mjs 'ACS Publications.js'
 node .bin/check-syntax.mjs 'Nature Publishing Group.js'
 node .bin/check-syntax.mjs 'Cell Press.js'
+node .bin/check-syntax.mjs 'RSC Publishing.js'
+node .bin/check-syntax.mjs 'Atypon Journals.js'
+node .bin/check-syntax.mjs 'Wiley Online Library.js'
 ```
+
+Deterministic descriptor coverage for the new publishers:
+
+```sh
+npx mocha test/tests/publisherSupplementaryTranslatorTest.mjs
+```
+
+Focused live diagnostics without library writes:
+
+```sh
+env LIVE_PUBLISHER_TESTS=true EXPECT_PUBLISHER_FIXES=true \
+  npx mocha --grep 'Live publisher translator diagnostics RSC$' \
+  --timeout 120000
+
+env LIVE_PUBLISHER_TESTS=true \
+  npx mocha --grep 'Live publisher translator diagnostics (Science|Wiley)' \
+  --timeout 120000
+```
+
+For Science and Wiley, inspect `LIVE_PUBLISHER_RESULT.page` even when `items` is
+null: the isolated browser may be stopped by the publisher's citation-metadata
+request before translator item creation. The deterministic helper test is the
+SI-descriptor regression check until a normal-profile run completes.
 
 When adding a publisher, prefer a saved HTML fixture or intercepted page for deterministic SI counts. Keep a smaller live test to detect publisher drift.
 
@@ -178,5 +277,7 @@ When adding a publisher, prefer a saved HTML fixture or intercepted page for det
 - Publisher access remains authoritative. The changes do not bypass paywalls; they use access the user already has through open access, subscriptions, or library authentication.
 - Zotero Desktop must be rebuilt from a checkout path without spaces. The already-built application above is ready for current live tests.
 - The ACS issue-page multiple-selection flow still needs broader live coverage.
+- The supplied Science and Wiley articles currently have no publisher-exposed SI; use the positive controls above.
+- Science and Wiley still need one bounded normal-profile/Desktop transfer after rebuilding with translator tip `70e15ee7`.
 - `LIVE_LIBRARY_TRANSFER=true` writes to the currently selected personal Zotero library. Obtain explicit authorization, use a bounded citation count, and never delete the user's test citations unless asked.
 - Existing authorized test citations and attachments were intentionally left in My Library for the user to remove.
