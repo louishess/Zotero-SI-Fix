@@ -23,7 +23,10 @@ const PUBLISHER_TRANSLATOR_IDS = [
 	'938ebe32-2b2e-4349-a5b3-b3a05d3de627', // ACS Publications
 	'3bae3a55-f021-4b59-8a14-43701f336adf', // Silverchair
 	'6614a99-479a-4524-8e30-686e4d66663e', // Nature Publishing Group
-	'f26cfb71-efd7-47ae-a28c-d4d8852096bd' // Cell Press
+	'f26cfb71-efd7-47ae-a28c-d4d8852096bd', // Cell Press
+	'ca0e7488-ef20-4485-8499-9c47e60dcfa7', // RSC Publishing
+	'5af42734-7cd5-4c69-97fc-bc406999bdba', // Atypon Journals (Science.org)
+	'fe728bc9-595a-4f03-98fc-766f1d8d0936' // Wiley Online Library
 ];
 
 const CASES = [
@@ -52,6 +55,41 @@ const CASES = [
 			|| 'https://www.cell.com/heliyon/fulltext/S2405-8440(24)04671-1',
 		expectedDOI: process.env.LIVE_CELL_PRESS_DOI || '10.1016/j.heliyon.2024.e28640',
 		expectedSupplementCount: Number(process.env.LIVE_CELL_PRESS_SUPPLEMENT_COUNT || 1)
+	},
+	{
+		publisher: 'RSC',
+		label: 'RSC Publishing',
+		url: 'https://pubs.rsc.org/ma/article/doi/10.1039/D6MA00514D/1287895/Casuarina-Derived-Carbon-Dots-for-Multifunctional?searchresult=1',
+		expectedDOI: '10.1039/D6MA00514D',
+		expectedSupplementCount: 3
+	},
+	{
+		publisher: 'Science requested (no published SI)',
+		label: 'Atypon Journals',
+		url: 'https://www.science.org/doi/10.1126/science.aef8874',
+		expectedDOI: '10.1126/science.aef8874',
+		expectedSupplementCount: 0
+	},
+	{
+		publisher: 'Science SI control',
+		label: 'Atypon Journals',
+		url: 'https://www.science.org/doi/10.1126/science.adt5229',
+		expectedDOI: '10.1126/science.adt5229',
+		expectedSupplementCount: 2
+	},
+	{
+		publisher: 'Wiley requested (no published SI)',
+		label: 'Wiley Online Library',
+		url: 'https://analyticalsciencejournals.onlinelibrary.wiley.com/doi/10.1002/cbf.70276',
+		expectedDOI: '10.1002/cbf.70276',
+		expectedSupplementCount: 0
+	},
+	{
+		publisher: 'Wiley SI control',
+		label: 'Wiley Online Library',
+		url: 'https://onlinelibrary.wiley.com/doi/10.1111/tpj.14950',
+		expectedDOI: '10.1111/tpj.14950',
+		expectedSupplementCount: 2
 	}
 ];
 
@@ -189,7 +227,13 @@ async function inspectPage(tab) {
 			natureFigureLinks: document.querySelectorAll('[data-test="supp-item"] a[href*="/figures/"]').length,
 			cellModernSupplements: [...document.querySelectorAll('#supplementary-material .core-supplementary-material .core-link a[href]')]
 				.map(link => ({ text: link.textContent.trim(), url: link.href })),
-			cellLegacySupplementCount: document.querySelectorAll('#main_supp dl dt').length
+			cellLegacySupplementCount: document.querySelectorAll('#main_supp dl dt').length,
+			rscModernSupplements: [...document.querySelectorAll('a[href*="/article-supplement/"]')]
+				.map(link => ({ text: link.textContent.trim(), url: link.href })),
+			scienceModernSupplements: [...document.querySelectorAll('#supplementary-materials a[href*="/doi/suppl/"]')]
+				.map(link => ({ text: link.textContent.trim(), url: link.href })),
+			wileyModernSupplements: [...document.querySelectorAll('a[href*="/action/downloadSupplement"]')]
+				.map(link => ({ text: link.textContent.trim(), url: link.href }))
 		};
 	});
 }
@@ -252,6 +296,58 @@ function assertPublisherFix(testCase, result) {
 			assert.isTrue(supplements.every(attachment => attachment.snapshot === false));
 		}
 	}
+	else if (testCase.publisher === 'RSC') {
+		assert.lengthOf(result.items, 1);
+		assert.equal(result.items[0].DOI, testCase.expectedDOI);
+		assert.isTrue(result.items[0].attachments.some(attachment =>
+			attachment.url?.includes('/article-pdf/doi/')),
+		'main RSC PDF descriptor was preserved');
+		let supplements = result.items[0].attachments.filter(attachment =>
+			attachment.url?.includes('/article-supplement/'));
+		assert.lengthOf(supplements, testCase.expectedSupplementCount);
+		assert.isTrue(supplements.every(attachment => attachment.mimeType === 'video/mp4'));
+		if (supplementaryAsLink) {
+			assert.isTrue(supplements.every(attachment => attachment.snapshot === false));
+		}
+	}
+	else if (testCase.publisher.startsWith('Science')) {
+		assert.lengthOf(result.items, 1);
+		assert.equal(result.items[0].DOI, testCase.expectedDOI);
+		assert.isTrue(result.items[0].attachments.some(attachment =>
+			attachment.url?.includes('/doi/pdf/')),
+		'main Science PDF descriptor was preserved');
+		let supplements = result.items[0].attachments.filter(attachment =>
+			attachment.url?.includes('/doi/suppl/'));
+		assert.lengthOf(supplements, testCase.expectedSupplementCount);
+		if (testCase.expectedSupplementCount) {
+			assert.sameMembers(supplements.map(attachment => attachment.mimeType), [
+				'application/pdf',
+				'application/zip'
+			]);
+		}
+		if (supplementaryAsLink) {
+			assert.isTrue(supplements.every(attachment => attachment.snapshot === false));
+		}
+	}
+	else if (testCase.publisher.startsWith('Wiley')) {
+		assert.lengthOf(result.items, 1);
+		assert.equal(result.items[0].DOI, testCase.expectedDOI);
+		assert.isTrue(result.items[0].attachments.some(attachment =>
+			attachment.url?.includes('/doi/pdfdirect/')),
+		'main Wiley PDF descriptor was preserved');
+		let supplements = result.items[0].attachments.filter(attachment =>
+			attachment.url?.includes('/action/downloadSupplement'));
+		assert.lengthOf(supplements, testCase.expectedSupplementCount);
+		if (testCase.expectedSupplementCount) {
+			assert.sameMembers(supplements.map(attachment => attachment.mimeType), [
+				'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+				'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+			]);
+		}
+		if (supplementaryAsLink) {
+			assert.isTrue(supplements.every(attachment => attachment.snapshot === false));
+		}
+	}
 }
 
 function assertLibraryTransfer(testCase, result) {
@@ -279,6 +375,21 @@ function assertLibraryTransfer(testCase, result) {
 		assert.lengthOf(savedAttachments.filter(attachment =>
 			attachment.url.includes('/attachment/')
 				|| attachment.url.includes('ars.els-cdn.com/content/image/')),
+		testCase.expectedSupplementCount);
+	}
+	else if (testCase.publisher === 'RSC') {
+		assert.lengthOf(savedAttachments.filter(attachment =>
+			attachment.url.includes('/article-supplement/')),
+		testCase.expectedSupplementCount);
+	}
+	else if (testCase.publisher.startsWith('Science')) {
+		assert.lengthOf(savedAttachments.filter(attachment =>
+			attachment.url.includes('/doi/suppl/')),
+		testCase.expectedSupplementCount);
+	}
+	else if (testCase.publisher.startsWith('Wiley')) {
+		assert.lengthOf(savedAttachments.filter(attachment =>
+			attachment.url.includes('/action/downloadSupplement')),
 		testCase.expectedSupplementCount);
 	}
 }
