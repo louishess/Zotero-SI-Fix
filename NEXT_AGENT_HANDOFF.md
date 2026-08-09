@@ -3,13 +3,13 @@
 ## Repositories and branches
 
 - Connector integration: <https://github.com/louishess/Zotero-SI-Fix/tree/fix/supplementary-preference-bridge>
-  - tip: `c14fc9b6c0d80ea1f37b525b41874168de5a1a66`
+  - tip before this documentation commit: `5a7ded2`
 - Publisher translators: <https://github.com/louishess/translators/tree/fix/supplementary-attachments>
-  - tip: `0d77dbaf1541f31bf3dac73611fefa060053f777`
+  - tip: `45d4b951`
 - Zotero Desktop preference handoff: <https://github.com/louishess/zotero/tree/fix/supplementary-preference-bridge>
   - tip: `acf089d99` (preference bridge plus the latest ACS/Nature/Cell Press translator pin)
 - Connector-compatible Zotero translator pin: <https://github.com/louishess/zotero/tree/fix/connector-supplementary-translators>
-  - tip: `04d0ab8daaf170b4207a820207cde2461279eb6e`
+  - tip: `b722f5c39`
 
 ## What works
 
@@ -21,15 +21,15 @@
 - ACS's new Silverchair URL is detected by the ACS translator. SI discovery resolves ACS Figshare records and transfers PDF, XLSX, ZIP, and MP4 files to Zotero. The main PDF uses ACS's established `/doi/pdf/<DOI>` route.
 - Cell Press saves metadata and modern SI files, deduplicates repeated page markup, and rewrites downloadable `mmc*` files to Elsevier's public CDN to avoid `www.cell.com` Cloudflare challenges.
 - Cell Press personal-library transfer succeeded for `10.1016/j.cell.2026.05.012`: one citation and both SI PDFs were accepted by Zotero.
+- Final manual live testing with the patched Zotero Desktop and unpacked Connector in the user's normal Chrome profile retrieved both the article PDF and SI for representative ACS, Nature, and Cell Press articles.
 - Download and link-only translator modes passed for ACS and Nature attachment descriptors.
 - The final non-live Connector suite passes: 103 passing, 4 opt-in live diagnostics skipped.
 
-## What does not work yet
+## Remaining limitations
 
-- The exact JACS SI PDF transfers successfully, but the isolated Chrome test profile cannot transfer the ACS article PDF because ACS returns HTTP 403 without the user's normal browser session. In normal Chrome, `/doi/pdf/10.1021/jacs.5c22031` redirects to and opens the full PDF. Load the unpacked build in that profile for the final combined-save proof.
+- Isolated Chrome test profiles can still receive publisher HTTP 403 responses for main PDFs that succeed in the user's normal signed-in Chrome profile. This is a test-environment limitation; the final live normal-profile transfers passed.
 - The Connector has a narrow temporary-user-agent rule for `ndownloader.figshare.com/files/`; it is required because Figshare's generic download hostname returns Amazon WAF HTTP 202 to Chrome's normal user agent. Do not broaden it to `pubs.acs.org`.
-- Cell Press's main full-text PDF URL still receives a Cloudflare challenge in the isolated Connector browser. The tested citation received both SI PDFs but not the main PDF.
-- The Zotero Desktop endpoint test is committed but was not executed successfully in this checkout. Its build scripts fail when the Desktop path contains spaces, and the CI configuration expects Node 18. Test it from a no-space checkout with the supported toolchain.
+- Zotero Desktop must be built from a path without spaces. The preference handoff was verified against the resulting running application, but its automated endpoint suite should still be run from that no-space checkout with the supported toolchain.
 - ACS PDF/XLSX/ZIP/MP4 SI transfers all passed against live articles and the user's Zotero library. Broader issue-page selection still lacks a complete live multiple-item test.
 
 ## Safe tests for the next agent
@@ -102,7 +102,7 @@ test/runtests.sh -b -g 'should return translator preferences to the Connector'
 `LIVE_LIBRARY_TRANSFER=true` sends real writes to Zotero's currently selected library. Do not run it casually. Authorized runs left these citations in **My Library** for the user to remove later:
 
 - Nature citation with the main PDF and all 21 SI files.
-- Six ACS citations from the reassessment: two copies of the requested JACS item with its SI PDF, plus JPCA, JCIM benchmark, ES&T, and JCIM multimedia items with all expected SI files. No ACS test item received the main article PDF from the isolated browser profile.
+- ACS reassessment citations include the requested JACS item with both its main article PDF and SI PDF, plus JPCA, JCIM benchmark, ES&T, and JCIM multimedia SI matrices.
 - Cell Press citation `10.1016/j.cell.2026.05.012` with both SI PDFs. The user manually deleted the incomplete first attempt before the successful replacement save.
 
 No test citation or attachment was deleted.

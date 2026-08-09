@@ -53,13 +53,15 @@ Test date: 2026-08-08
 - Full Connector regression suite: **103 passing**, 4 live diagnostics skipped by default.
 - Translator syntax checks and `git diff --check`: passed.
 
-## Remaining end-to-end check
+## Final end-to-end validation
 
 An explicitly authorized transfer test was subsequently run against the user's selected **My Library** destination. The imported items were left in place:
 
 - Nature: `saveItems` succeeded, followed by 22 successful `saveAttachment` calls—one main PDF and all 21 supplementary files.
 - ACS SI transfer now succeeds through Figshare. Authorized personal-library runs transferred the requested JACS SI PDF plus PDF, XLSX, ZIP, and MP4 supplements from four additional ACS articles.
-- The exact JACS article's main PDF still cannot be transferred from the isolated Chrome test profile because ACS returns HTTP 403 there. The same restored `/doi/pdf/<DOI>` route opens the article PDF in the user's normal signed-in Chrome; the remaining combined-save check must use the unpacked build in that profile.
+- On 2026-08-08, the user completed a manual live test with the patched Zotero Desktop application and unpacked Chrome Connector in the normal signed-in browser profile. Representative ACS, Nature, and Cell Press citations each received both the main article PDF and supplementary files.
+- Before that save, `/connector/ping` was verified to return `translatorPrefsVersion: 1`, `attachSupplementary: true`, and `supplementaryAsLink: false`; Zotero also supplied all three patched publisher translator revisions.
+- A read-only library inspection independently confirmed the requested JACS citation with its full-text PDF and SI PDF, and the Nature citation with its full-text PDF plus PDF/XLSX supplementary attachments.
 
 ## Cell Press personal-library transfer
 
@@ -70,9 +72,7 @@ An explicitly authorized transfer test was subsequently run against the user's s
 - The translator now derives the corresponding public `ars.els-cdn.com` URLs from the article PII and `mmc*` filenames in download mode.
 - Connector-level fetch validation downloaded both PDFs: 2,806,935 bytes and 9,350,052 bytes.
 - The replacement library save produced one successful `saveItems` call and two successful `saveAttachment` calls, one for each SI PDF.
-- The main full-text PDF remained blocked by Cell Press; the SI transfer itself is confirmed functional.
+- The earlier isolated Chrome profile could not fetch the main full-text PDF, but the final normal-profile test transferred the article PDF and SI successfully.
 - The user deleted the incomplete first attempt before the successful replacement citation was written.
 
-The remaining ACS release check is one combined save from the unpacked Connector in the user's normal Chrome profile: the SI path is confirmed, and the restored article-PDF path is confirmed separately in that profile.
-
-The companion Zotero Desktop endpoint test is present, but its application build is currently blocked by upstream build scripts that do not quote workspace paths containing spaces. The Connector preference bridge itself is covered by the passing Connector tests.
+The universal Desktop-to-Connector preference handoff and publisher attachment paths are therefore confirmed functional in live use. Zotero Desktop must be built from a checkout whose path contains no spaces; the Connector itself builds successfully in the existing workspace path.
