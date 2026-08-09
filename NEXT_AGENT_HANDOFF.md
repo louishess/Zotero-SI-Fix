@@ -6,7 +6,7 @@ Extend automatic supplementary-information (SI) downloads to additional online p
 
 The main article PDF is already expected to download whenever the user's normal browser session has access—through open access, an individual subscription, or a university/library login. Treat that as a baseline invariant. SI support should be additive and must not replace, suppress, or reroute a working main-PDF attachment unless the publisher has actually retired the endpoint.
 
-An HTTP 403 in an isolated test browser does not prove that a main-PDF URL is broken. Recheck it in the user's normal Chrome profile, where publisher cookies and institutional access are available.
+An HTTP 403 in an isolated test browser does not prove that a main-PDF URL is broken. Recheck it in the user's normal Chrome profile, where publisher cookies and institutional access may be available.
 
 ## Ready-to-use local builds
 
