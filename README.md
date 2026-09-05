@@ -143,3 +143,7 @@ The injected scripts monkey-patch methods in *messaging_injected.js*([BrowserExt
 
 If you have any questions about developing Zotero Connectors you can join the discussion in the
 [zotero-dev mailing list](https://groups.google.com/forum/#!forum/zotero-dev).
+
+## Combined SI and annotation build
+
+This checkout accompanies the sibling ZoteroCombined Desktop project. Read the shared [master agent and project guide](../ZoteroCombined/AGENTS.md) for current state, exact build inputs, validation, and remaining work.
